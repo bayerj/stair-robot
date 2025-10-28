@@ -1,0 +1,22 @@
+[project]
+name = "stair-robot"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+authors = [
+    { name = "Justin Bayer", email = "bayer.justin@googlemail.com" }
+]
+requires-python = ">=3.12.3"
+dependencies = [
+    "mujoco>=3.2.0",
+    "mujoco-mjx>=3.3.7",
+    "scipy>=1.10.0",
+    "seher @ git+https://github.com/bayerj/seher.git",
+]
+
+[tool.hatch.metadata]
+allow-direct-references = true
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
