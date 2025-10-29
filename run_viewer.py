@@ -24,6 +24,8 @@ from seher.control.mpc import MPCPolicy
 from seher.control.stepper_planner import StepperPlanner  
 from seher.stepper.mppi import GaussianMPPIOptimizer
 from hexapod_mdp import HexapodMDP, HexapodState
+import threading
+import concurrent.futures
 
 # Set up rich logging
 console = Console()
@@ -92,6 +94,9 @@ class HexapodController:
         self.timing_violations = 0
         self.total_steps_timed = 0
         
+        # Thread executor for control computation
+        self.executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+        
         # Initialize appropriate controller
         if controller_type == "mppi":
             # Create MDP for MPPI with control frequency dt
@@ -123,6 +128,25 @@ class HexapodController:
             logger.info(f"Seher MPC+MPPI Controller initialized: {control_frequency}Hz control")
         else:
             logger.info(f"Simple Controller initialized: {control_frequency}Hz control, {gait_frequency}Hz gait")
+    
+    def _compute_mppi_control(self, jax_state, subkey):
+        """Compute MPPI control in a separate thread"""
+        self.policy_carry, control = self.mpc_policy(
+            carry=self.policy_carry,
+            obs=jax_state,
+            control=self.mdp.empty_control(),
+            key=subkey
+        )
+        return np.array(control)
+    
+    def _compute_simple_control(self):
+        """Compute simple control in a separate thread"""
+        return simple_walking_pattern(
+            self.step_count,
+            self.model.nu,
+            self.gait_frequency,
+            self.control_dt
+        )
     
     async def run(self):
         """Main control loop"""
@@ -156,29 +180,28 @@ class HexapodController:
             control_start_time = time.time()
             
             if self.controller_type == "mppi":
-                # MPC+MPPI control using seher framework
+                # MPC+MPPI control using seher framework in a separate thread
                 # Convert MuJoCo state to JAX state
                 jax_state = HexapodState(
                     qpos=jnp.array(self.data.qpos.copy()),
                     qvel=jnp.array(self.data.qvel.copy())
                 )
                 
-                # Get control from MPC policy
+                # Get control from MPC policy in thread
                 self.jax_key, subkey = jax.random.split(self.jax_key)
-                self.policy_carry, control = self.mpc_policy(
-                    carry=self.policy_carry,
-                    obs=jax_state,
-                    control=self.mdp.empty_control(),  # Previous control (not used)
-                    key=subkey
+                loop = asyncio.get_event_loop()
+                control = await loop.run_in_executor(
+                    self.executor, 
+                    self._compute_mppi_control, 
+                    jax_state, 
+                    subkey
                 )
-                control = np.array(control)
             else:
-                # Simple walking pattern
-                control = simple_walking_pattern(
-                    self.step_count, 
-                    self.model.nu, 
-                    self.gait_frequency,
-                    self.control_dt
+                # Simple walking pattern in thread
+                loop = asyncio.get_event_loop()
+                control = await loop.run_in_executor(
+                    self.executor,
+                    self._compute_simple_control
                 )
             
             control_time = time.time() - control_start_time
@@ -210,6 +233,8 @@ class HexapodController:
     def stop(self):
         """Stop the control loop"""
         self.running = False
+        # Shutdown thread executor
+        self.executor.shutdown(wait=False)
         logger.info("Control loop stopped")
 
 
