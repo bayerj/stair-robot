@@ -159,12 +159,13 @@ class HexapodController:
             # Check timing from previous step
             if self.last_step_time is not None:
                 actual_dt = step_start_time - self.last_step_time
-                target_dt = self.control_dt
+                # Adjust target dt for slow motion
+                target_dt = self.control_dt * (1.0 / self.slow_motion)
                 
                 if actual_dt > target_dt * 1.5:  # 50% tolerance
                     self.timing_violations += 1
                     if self.timing_violations <= 5:  # Only warn for first few violations
-                        logger.warning(f"Control frequency violation: {actual_dt:.3f}s actual vs {target_dt:.3f}s target")
+                        logger.warning(f"Control frequency violation: {actual_dt:.3f}s actual vs {target_dt:.3f}s target (slow motion: {self.slow_motion}x)")
                 
                 self.total_steps_timed += 1
                 
