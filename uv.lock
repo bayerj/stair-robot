@@ -1750,7 +1750,7 @@ wheels = [
 [[package]]
 name = "seher"
 version = "0.1.0"
-source = { git = "https://github.com/bayerj/seher.git#48cbb3ea1ccd7f2ce1bbe50f8a454dcf45cd9c8a" }
+source = { editable = "../seher" }
 dependencies = [
     { name = "defopt" },
     { name = "dm-control" },
@@ -1768,6 +1768,26 @@ dependencies = [
     { name = "rich" },
     { name = "robot-descriptions" },
     { name = "scipy" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "defopt", specifier = ">=6.4.0" },
+    { name = "dm-control", specifier = ">=1.0.27" },
+    { name = "flax", specifier = ">=0.10.4" },
+    { name = "jax", specifier = ">=0.6.1" },
+    { name = "jaxlib", specifier = ">=0.6.1" },
+    { name = "matplotlib", specifier = ">=3.10.3" },
+    { name = "moviepy", specifier = ">=2.1.2" },
+    { name = "mujoco-mjx", specifier = ">=3.3.0" },
+    { name = "optax", specifier = ">=0.2.4" },
+    { name = "optuna", specifier = ">=4.2.1" },
+    { name = "optuna-dashboard", specifier = ">=0.17.0" },
+    { name = "playground", specifier = ">=0.0.3" },
+    { name = "plotext", specifier = ">=5.3.2" },
+    { name = "rich", specifier = ">=13.9.4" },
+    { name = "robot-descriptions", specifier = ">=1.15.0" },
+    { name = "scipy", specifier = ">=1.15.2" },
 ]
 
 [[package]]
@@ -1879,18 +1899,22 @@ name = "stair-robot"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
+    { name = "defopt" },
     { name = "mujoco" },
     { name = "mujoco-mjx" },
+    { name = "rich" },
     { name = "scipy" },
     { name = "seher" },
 ]
 
 [package.metadata]
 requires-dist = [
-    { name = "mujoco", specifier = ">=3.2.0" },
+    { name = "defopt", specifier = ">=6.4.0" },
+    { name = "mujoco", extras = ["mjpython"], specifier = ">=3.2.0" },
     { name = "mujoco-mjx", specifier = ">=3.3.7" },
+    { name = "rich", specifier = ">=13.0.0" },
     { name = "scipy", specifier = ">=1.10.0" },
-    { name = "seher", git = "https://github.com/bayerj/seher.git" },
+    { name = "seher", editable = "../seher" },
 ]
 
 [[package]]

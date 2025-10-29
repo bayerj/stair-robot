@@ -20,7 +20,9 @@ from rich.logging import RichHandler
 from rich.console import Console
 import jax
 import jax.numpy as jnp
-from mppi_controller import MPPIController
+from seher.control.mpc import MPCPolicy
+from seher.control.stepper_planner import StepperPlanner  
+from seher.stepper.mppi import GaussianMPPIOptimizer
 from hexapod_mdp import HexapodMDP, HexapodState
 
 # Set up rich logging
@@ -74,7 +76,8 @@ class HexapodController:
     
     def __init__(self, model: mujoco.MjModel, data: mujoco.MjData, 
                  control_frequency: float = 50.0, gait_frequency: float = 2.0,
-                 controller_type: str = "simple", xml_path: str = "hexagonal_robot.xml"):
+                 controller_type: str = "simple", xml_path: str = "hexagonal_robot.xml",
+                 slow_motion: float = 1.0):
         self.model = model
         self.data = data
         self.control_dt = 1.0 / control_frequency
@@ -82,6 +85,7 @@ class HexapodController:
         self.step_count = 0
         self.running = False
         self.controller_type = controller_type
+        self.slow_motion = slow_motion
         
         # Timing monitoring
         self.last_step_time = None
@@ -94,17 +98,29 @@ class HexapodController:
             self.mdp = HexapodMDP.create(xml_path, dt=self.control_dt)
             self.jax_key = jax.random.PRNGKey(42)
             
-            # Initialize MPPI controller
-            self.mppi_controller = MPPIController(
+            # Create MPPI planner using seher framework
+            planner = StepperPlanner(
                 mdp=self.mdp,
-                horizon=4,
-                n_candidates=8,
-                top_k=2,  # Must be <= n_candidates
-                temperature=1.0,
-                noise_scale=0.3
+                n_iter=3,  # Small for real-time
+                n_plan_steps=4,  # Short horizon for real-time
+                warm_start=True,
+                optimizer=GaussianMPPIOptimizer(
+                    objective=None,
+                    n_candidates=8,
+                    top_k=2,
+                    min_scale=0.01,
+                    temperature=1.0,
+                    # Use 1D controls per timestep like the working LQR test
+                    initial_loc=jnp.zeros(self.mdp.n_ctrl),  # (n_ctrl,) 
+                    initial_scale=jnp.ones(self.mdp.n_ctrl) * 0.3,  # (n_ctrl,)
+                ),
             )
             
-            logger.info(f"MPPI Controller initialized: {control_frequency}Hz control")
+            # Create MPC policy
+            self.mpc_policy = MPCPolicy(mdp=self.mdp, planner=planner)
+            self.policy_carry = self.mpc_policy.initial_carry()
+            
+            logger.info(f"Seher MPC+MPPI Controller initialized: {control_frequency}Hz control")
         else:
             logger.info(f"Simple Controller initialized: {control_frequency}Hz control, {gait_frequency}Hz gait")
     
@@ -140,16 +156,21 @@ class HexapodController:
             control_start_time = time.time()
             
             if self.controller_type == "mppi":
-                # MPPI control
+                # MPC+MPPI control using seher framework
                 # Convert MuJoCo state to JAX state
                 jax_state = HexapodState(
                     qpos=jnp.array(self.data.qpos.copy()),
                     qvel=jnp.array(self.data.qvel.copy())
                 )
                 
-                # Get control from MPPI
+                # Get control from MPC policy
                 self.jax_key, subkey = jax.random.split(self.jax_key)
-                control, _ = self.mppi_controller.get_control(jax_state, subkey)
+                self.policy_carry, control = self.mpc_policy(
+                    carry=self.policy_carry,
+                    obs=jax_state,
+                    control=self.mdp.empty_control(),  # Previous control (not used)
+                    key=subkey
+                )
                 control = np.array(control)
             else:
                 # Simple walking pattern
@@ -166,7 +187,7 @@ class HexapodController:
             if control_time > self.control_dt * 0.8:  # 80% of available time
                 logger.warning(f"Control computation slow: {control_time:.3f}s (target: {self.control_dt:.3f}s)")
             
-            # Apply control
+            # Apply control (viewer handles simulation stepping)
             self.data.ctrl[:] = control
             
             self.step_count += 1
@@ -182,8 +203,9 @@ class HexapodController:
                 else:
                     logger.info(f"Step {self.step_count}: height={height:.3f}m, vel_x={vel_x:.3f}m/s, |ctrl|={ctrl_norm:.3f}")
             
-            # Sleep until next control step
-            await asyncio.sleep(self.control_dt)
+            # Sleep until next control step (adjusted for slow motion)
+            adjusted_control_dt = self.control_dt * (1.0 / self.slow_motion)
+            await asyncio.sleep(adjusted_control_dt)
     
     def stop(self):
         """Stop the control loop"""
@@ -192,59 +214,54 @@ class HexapodController:
 
 
 class AsyncMuJoCoViewer:
-    """Async wrapper for MuJoCo viewer"""
+    """Async wrapper for MuJoCo viewer with configurable simulation frequency"""
     
-    def __init__(self, model: mujoco.MjModel, data: mujoco.MjData):
+    def __init__(self, model: mujoco.MjModel, data: mujoco.MjData, 
+                 sim_frequency: float = 500.0, slow_motion: float = 1.0):
         self.model = model
         self.data = data
         self.viewer = None
         self.running = False
+        self.slow_motion = slow_motion
+        self.sim_frequency = sim_frequency
+        
+        # Calculate simulation timestep for target frequency, adjusted for slow motion
+        self.sim_dt = (1.0 / sim_frequency) / slow_motion
         
     async def run(self):
         """Run the viewer loop"""
         try:
             logger.info("Launching MuJoCo viewer...")
             
-            # Try different viewer approaches
+            # Use passive viewer for better control over simulation stepping
             try:
-                # First try the passive viewer (works on Linux/Windows)
                 with mujoco.viewer.launch_passive(self.model, self.data) as viewer:
                     self.viewer = viewer
                     self.running = True
                     logger.info("Viewer launched successfully (passive mode)")
                     
-                    # Viewer loop
+                    # Viewer loop - step simulation at target frequency
+                    last_step_time = time.time()
+                    logger.info(f"Viewer running at {self.sim_frequency}Hz simulation frequency (slow motion: {self.slow_motion}x)")
+                    
                     while self.running and viewer.is_running():
-                        # Step simulation
-                        mujoco.mj_step(self.model, self.data)
+                        current_time = time.time()
                         
-                        # Sync viewer (this should be non-blocking)
+                        # Step simulation at target frequency with slow motion
+                        if current_time - last_step_time >= self.sim_dt:
+                            mujoco.mj_step(self.model, self.data)
+                            last_step_time = current_time
+                        
+                        # Sync viewer to display current state
                         viewer.sync()
                         
-                        # Small sleep to prevent busy waiting
-                        await asyncio.sleep(0.001)  # ~1000 FPS max
+                        # Sleep for a short time to prevent busy-waiting
+                        await asyncio.sleep(0.0001)  # Very short sleep
                     
                     logger.info("Viewer loop ended")
                     
             except RuntimeError as e:
-                if "mjpython" in str(e):
-                    logger.info("Passive viewer not available, trying active viewer...")
-                    
-                    # Fallback to active viewer (might work on macOS)
-                    viewer = mujoco.viewer.launch(self.model, self.data)
-                    self.viewer = viewer
-                    self.running = True
-                    logger.info("Viewer launched successfully (active mode)")
-                    
-                    # For active viewer, we don't need a loop - it runs in its own thread
-                    while self.running:
-                        # Just step the simulation, viewer updates automatically
-                        mujoco.mj_step(self.model, self.data)
-                        await asyncio.sleep(0.001)
-                    
-                    logger.info("Viewer loop ended")
-                else:
-                    raise
+                raise RuntimeError(f"Passive viewer failed: {e}. Make sure MuJoCo is properly installed with mjpython support.")
                 
         except Exception as e:
             logger.error(f"Could not launch viewer: {e}")
@@ -263,7 +280,9 @@ async def run_simulation(
     control_frequency: float = 50.0,
     gait_frequency: float = 2.0,
     headless: bool = False,
-    controller_type: str = "simple"
+    controller_type: str = "simple",
+    slow_motion: float = 1.0,
+    sim_frequency: float = 500.0
 ):
     """Run the hexapod simulation with async viewer and controller"""
     
@@ -287,7 +306,8 @@ async def run_simulation(
         control_frequency=control_frequency,
         gait_frequency=gait_frequency,
         controller_type=controller_type,
-        xml_path=xml_path
+        xml_path=xml_path,
+        slow_motion=slow_motion
     )
     
     # Create tasks
@@ -299,7 +319,7 @@ async def run_simulation(
     
     # Add viewer task if not headless
     if not headless:
-        viewer = AsyncMuJoCoViewer(model, data)
+        viewer = AsyncMuJoCoViewer(model, data, sim_frequency=sim_frequency, slow_motion=slow_motion)
         viewer_task = asyncio.create_task(viewer.run())
         tasks.append(viewer_task)
         
@@ -345,7 +365,9 @@ def main(
     control_frequency: float = 50.0,
     gait_frequency: float = 2.0,
     headless: bool = False,
-    controller: str = "simple"
+    controller: str = "simple",
+    slow_motion: float = 1.0,
+    sim_frequency: float = 500.0
 ):
     """
     Run MuJoCo viewer with async hexapod controller.
@@ -356,6 +378,8 @@ def main(
         gait_frequency: Walking gait frequency in Hz (for simple controller)  
         headless: Run without viewer (simulation only)
         controller: Controller type ('simple' or 'mppi')
+        slow_motion: Slow motion factor (1.0 = real time, 0.5 = half speed, 2.0 = double speed)
+        sim_frequency: Simulation frequency in Hz (how fast the physics runs)
     """
     
     logger.info("🤖 Starting Hexapod Robot Simulation")
@@ -365,6 +389,9 @@ def main(
     if controller == "simple":
         logger.info(f"Gait frequency: {gait_frequency} Hz")
     logger.info(f"Headless mode: {headless}")
+    logger.info(f"Simulation frequency: {sim_frequency} Hz")
+    if slow_motion != 1.0:
+        logger.info(f"Slow motion: {slow_motion}x speed")
     
     # Run the async simulation
     asyncio.run(run_simulation(
@@ -372,7 +399,9 @@ def main(
         control_frequency=control_frequency,
         gait_frequency=gait_frequency,
         headless=headless,
-        controller_type=controller
+        controller_type=controller,
+        slow_motion=slow_motion,
+        sim_frequency=sim_frequency
     ))
     
     logger.info("🏁 Simulation finished")
