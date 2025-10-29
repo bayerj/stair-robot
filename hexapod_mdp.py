@@ -4,7 +4,7 @@ import mujoco
 import numpy as np
 import jax
 import jax.numpy as jnp
-from dataclasses import dataclass
+from flax.struct import dataclass, field
 from seher.types import JaxRandomKey
 import os
 
@@ -20,15 +20,20 @@ class HexapodState:
 class HexapodMDP:
     """Pure functional Hexapod robot MDP implementation for seher"""
     
-    xml_path: str
-    dt: float
-    n_ctrl: int
-    control_min: jnp.ndarray
-    control_max: jnp.ndarray
-    discount: float = 0.99
+    xml_path: str = field(pytree_node=False)
+    dt: float = field(pytree_node=False)
+    n_ctrl: int = field(pytree_node=False)
+    control_min: jnp.ndarray = field(pytree_node=False)
+    control_max: jnp.ndarray = field(pytree_node=False)
+    discount: float = field(default=0.99, pytree_node=False)
+    
+    def __hash__(self):
+        """Make HexapodMDP hashable for JAX compilation."""
+        # Hash based on static configuration, not the JAX arrays
+        return hash((self.xml_path, self.dt, self.n_ctrl, self.discount))
     
     @classmethod
-    def create(cls, xml_path: str, dt: float = 0.01):
+    def create(cls, xml_path: str, dt: float = None):
         """Create HexapodMDP by reading control info from MuJoCo model"""
         # Get absolute path to XML file
         if not os.path.isabs(xml_path):
@@ -36,6 +41,10 @@ class HexapodMDP:
         
         # Load model to read control information
         model = mujoco.MjModel.from_xml_path(xml_path)
+        
+        # Use MuJoCo timestep if dt not specified
+        if dt is None:
+            dt = model.opt.timestep
         
         # Get number of actuators from model
         n_ctrl = model.nu
@@ -95,26 +104,39 @@ class HexapodMDP:
     
     def transit(self, state: HexapodState, control: jnp.ndarray, key: JaxRandomKey) -> HexapodState:
         """Simulate one step forward - pure function"""
-        model = mujoco.MjModel.from_xml_path(self.xml_path)
-        data = mujoco.MjData(model)
+        # This function should be JIT-compiled, so we use a host callback for MuJoCo simulation
+        def _mujoco_step(qpos, qvel, ctrl):
+            # Load model and data
+            model = mujoco.MjModel.from_xml_path(self.xml_path)
+            data = mujoco.MjData(model)
+            
+            # Set state (convert from JAX arrays to numpy)
+            data.qpos[:] = np.asarray(qpos)
+            data.qvel[:] = np.asarray(qvel)
+            data.ctrl[:] = np.asarray(ctrl)
+            
+            # Simulate multiple steps
+            steps_per_control = int(self.dt / model.opt.timestep)
+            for _ in range(steps_per_control):
+                mujoco.mj_step(model, data)
+            
+            # Return new state as numpy arrays
+            return np.array(data.qpos.copy()), np.array(data.qvel.copy())
         
-        # Set state
-        data.qpos[:] = np.array(state.qpos)
-        data.qvel[:] = np.array(state.qvel)
-        
-        # Apply control directly to all actuators
+        # Clip control within bounds
         control = jnp.clip(control, self.control_min, self.control_max)
-        data.ctrl[:] = np.array(control)
         
-        # Simulate multiple steps
-        steps_per_control = int(self.dt / model.opt.timestep)
-        for _ in range(steps_per_control):
-            mujoco.mj_step(model, data)
+        # Use JAX host callback to call MuJoCo simulation
+        result_shape = (jax.ShapeDtypeStruct(state.qpos.shape, state.qpos.dtype),
+                       jax.ShapeDtypeStruct(state.qvel.shape, state.qvel.dtype))
         
-        return HexapodState(
-            qpos=jnp.array(data.qpos.copy()),
-            qvel=jnp.array(data.qvel.copy())
+        new_qpos, new_qvel = jax.experimental.io_callback(
+            _mujoco_step,
+            result_shape,
+            state.qpos, state.qvel, control
         )
+        
+        return HexapodState(qpos=new_qpos, qvel=new_qvel)
     
     def cost(self, state: HexapodState, control: jnp.ndarray, key: JaxRandomKey) -> float:
         """Calculate cost (negative reward) - pure function"""

@@ -8,14 +8,19 @@ authors = [
 ]
 requires-python = ">=3.12.3"
 dependencies = [
-    "mujoco>=3.2.0",
+    "mujoco[mjpython]>=3.2.0",
     "mujoco-mjx>=3.3.7",
     "scipy>=1.10.0",
-    "seher @ git+https://github.com/bayerj/seher.git",
+    "defopt>=6.4.0",
+    "rich>=13.0.0",
+    "seher",
 ]
 
 [tool.hatch.metadata]
 allow-direct-references = true
+
+[tool.uv.sources]
+seher = { path = "/Users/bayerj/devel/seher", editable = true }
 
 [build-system]
 requires = ["hatchling"]
