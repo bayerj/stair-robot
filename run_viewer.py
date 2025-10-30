@@ -27,6 +27,41 @@ from hexapod_mdp import HexapodMDP, HexapodState
 import threading
 import concurrent.futures
 
+jax.config.update('jax_num_cpu_devices', 8)
+
+def call_policy_with_coefficients(base_policy):
+    """Create a JIT-compiled wrapper for a specific policy that can accept dynamic coefficients"""
+    @jax.jit
+    def policy_wrapper(carry, obs, control, key, current_coefficients):
+        # Inside JIT: replace the policy's MDP with new coefficients
+        updated_mdp = base_policy.mdp.replace(cost_coefficients=current_coefficients)
+        updated_policy = base_policy.replace(mdp=updated_mdp)
+        
+        # Call the updated policy
+        return updated_policy(carry, obs, control, key)
+    
+    return policy_wrapper
+
+# TUI integration (only imported when needed)
+def setup_early_tui_logging():
+    """Set up TUI logging as early as possible to capture startup logs"""
+    try:
+        from cost_tuner_tui import setup_early_logging
+        setup_early_logging()
+    except ImportError:
+        # TUI not available, continue without it
+        pass
+
+def import_tui():
+    """Lazy import TUI to avoid overhead when not used"""
+    try:
+        from cost_tuner_tui import run_tui_interface, current_mdp
+        return run_tui_interface, current_mdp
+    except ImportError as e:
+        logger.error(f"TUI import failed: {e}")
+        logger.error("Install textual: uv add textual")
+        return None, None
+
 # Set up rich logging
 console = Console()
 logging.basicConfig(
@@ -77,9 +112,10 @@ class HexapodController:
     """Async controller for the hexapod robot"""
     
     def __init__(self, model: mujoco.MjModel, data: mujoco.MjData, 
-                 control_frequency: float = 50.0, gait_frequency: float = 2.0,
+                 control_frequency: float = 50.0, planning_frequency: float = 20.0,
+                 gait_frequency: float = 2.0,
                  controller_type: str = "simple", xml_path: str = "hexagonal_robot.xml",
-                 slow_motion: float = 1.0):
+                 slow_motion: float = 1.0, mdp: HexapodMDP = None, use_shared_mdp: bool = False):
         self.model = model
         self.data = data
         self.control_dt = 1.0 / control_frequency
@@ -88,6 +124,7 @@ class HexapodController:
         self.running = False
         self.controller_type = controller_type
         self.slow_motion = slow_motion
+        self.use_shared_mdp = use_shared_mdp
         
         # Timing monitoring
         self.last_step_time = None
@@ -99,14 +136,17 @@ class HexapodController:
         
         # Initialize appropriate controller
         if controller_type == "mppi":
-            # Create MDP for MPPI with control frequency dt
-            self.mdp = HexapodMDP.create(xml_path, dt=self.control_dt)
+            # Use provided MDP or create new one
+            if mdp is not None:
+                self.mdp = mdp
+            else:
+                self.mdp = HexapodMDP.create(xml_path, dt=1.0/planning_frequency)
             self.jax_key = jax.random.PRNGKey(42)
             
             # Create MPPI planner using seher framework
             planner = StepperPlanner(
                 mdp=self.mdp,
-                n_iter=3,  # Small for real-time
+                n_iter=1,  # Small for real-time
                 n_plan_steps=4,  # Short horizon for real-time
                 warm_start=True,
                 optimizer=GaussianMPPIOptimizer(
@@ -114,10 +154,9 @@ class HexapodController:
                     n_candidates=8,
                     top_k=2,
                     min_scale=0.01,
-                    temperature=1.0,
-                    # Use 1D controls per timestep like the working LQR test
-                    initial_loc=jnp.zeros(self.mdp.n_ctrl),  # (n_ctrl,) 
-                    initial_scale=jnp.ones(self.mdp.n_ctrl) * 0.3,  # (n_ctrl,)
+                    temperature=0.3,
+                    initial_loc=jnp.zeros(self.mdp.n_ctrl), 
+                    initial_scale=jnp.ones(self.mdp.n_ctrl) * 0.3,
                 ),
             )
             
@@ -125,17 +164,29 @@ class HexapodController:
             self.mpc_policy = MPCPolicy(mdp=self.mdp, planner=planner)
             self.policy_carry = self.mpc_policy.initial_carry()
             
+            # Create JIT-compiled wrapper using closure approach
+            self.jit_policy_wrapper = call_policy_with_coefficients(self.mpc_policy)
+            
             logger.info(f"Seher MPC+MPPI Controller initialized: {control_frequency}Hz control")
         else:
             logger.info(f"Simple Controller initialized: {control_frequency}Hz control, {gait_frequency}Hz gait")
     
     def _compute_mppi_control(self, jax_state, subkey):
         """Compute MPPI control in a separate thread"""
-        self.policy_carry, control = self.mpc_policy(
+        # Get current coefficients (either shared from TUI or original)
+        if self.use_shared_mdp:
+            run_tui_interface, current_mdp = import_tui()
+            current_coefficients = current_mdp.cost_coefficients if current_mdp is not None else self.mdp.cost_coefficients
+        else:
+            current_coefficients = self.mdp.cost_coefficients
+            
+        # Use JIT-compiled wrapper that internally does replace+call
+        self.policy_carry, control = self.jit_policy_wrapper(
             carry=self.policy_carry,
             obs=jax_state,
             control=self.mdp.empty_control(),
-            key=subkey
+            key=subkey,
+            current_coefficients=current_coefficients
         )
         return np.array(control)
     
@@ -304,11 +355,13 @@ class AsyncMuJoCoViewer:
 async def run_simulation(
     xml_path: str,
     control_frequency: float = 50.0,
+    planning_frequency: float = 20.0,
     gait_frequency: float = 2.0,
     headless: bool = False,
     controller_type: str = "simple",
     slow_motion: float = 1.0,
-    sim_frequency: float = 500.0
+    sim_frequency: float = 500.0,
+    tui: bool = False
 ):
     """Run the hexapod simulation with async viewer and controller"""
     
@@ -326,14 +379,22 @@ async def run_simulation(
     standing_pose(model, data)
     logger.info("Robot set to standing pose")
     
+    # Create MDP for TUI sharing (if needed)
+    mdp = None
+    if tui and controller_type == "mppi":
+        mdp = HexapodMDP.create(xml_path, dt=1.0/planning_frequency)
+    
     # Create controller
     controller = HexapodController(
         model, data, 
         control_frequency=control_frequency,
+        planning_frequency=planning_frequency,
         gait_frequency=gait_frequency,
         controller_type=controller_type,
         xml_path=xml_path,
-        slow_motion=slow_motion
+        slow_motion=slow_motion,
+        mdp=mdp,
+        use_shared_mdp=tui and controller_type == "mppi"
     )
     
     # Create tasks
@@ -342,6 +403,19 @@ async def run_simulation(
     # Add controller task
     controller_task = asyncio.create_task(controller.run())
     tasks.append(controller_task)
+    
+    # Add TUI task if enabled
+    if tui:
+        if mdp is None:
+            logger.warning("TUI requires MPPI controller, but simple controller selected. TUI disabled.")
+        else:
+            run_tui_interface, current_mdp = import_tui()
+            if run_tui_interface is not None:
+                tui_task = asyncio.create_task(run_tui_interface(mdp))
+                tasks.append(tui_task)
+                logger.info("TUI task started")
+            else:
+                logger.error("Failed to start TUI")
     
     # Add viewer task if not headless
     if not headless:
@@ -389,11 +463,13 @@ def main(
     xml_path: str = "hexagonal_robot.xml",
     *,
     control_frequency: float = 50.0,
+    planning_frequency: float = 20.0,
     gait_frequency: float = 2.0,
     headless: bool = False,
     controller: str = "simple",
     slow_motion: float = 1.0,
-    sim_frequency: float = 500.0
+    sim_frequency: float = 500.0,
+    tui: bool = False
 ):
     """
     Run MuJoCo viewer with async hexapod controller.
@@ -401,12 +477,18 @@ def main(
     Args:
         xml_path: Path to the MuJoCo XML model file
         control_frequency: Control loop frequency in Hz
+        planning_frequency: MDP planning frequency in Hz (for MPPI controller)
         gait_frequency: Walking gait frequency in Hz (for simple controller)  
         headless: Run without viewer (simulation only)
         controller: Controller type ('simple' or 'mppi')
         slow_motion: Slow motion factor (1.0 = real time, 0.5 = half speed, 2.0 = double speed)
         sim_frequency: Simulation frequency in Hz (how fast the physics runs)
+        tui: Enable TUI for live cost function tuning
     """
+    
+    # Set up TUI logging early if TUI is enabled, to capture startup logs
+    if tui:
+        setup_early_tui_logging()
     
     logger.info("🤖 Starting Hexapod Robot Simulation")
     logger.info(f"Model: {xml_path}")
@@ -418,16 +500,20 @@ def main(
     logger.info(f"Simulation frequency: {sim_frequency} Hz")
     if slow_motion != 1.0:
         logger.info(f"Slow motion: {slow_motion}x speed")
+    if tui:
+        logger.info("TUI: Live cost tuning enabled")
     
     # Run the async simulation
     asyncio.run(run_simulation(
         xml_path=xml_path,
         control_frequency=control_frequency,
+        planning_frequency=planning_frequency,
         gait_frequency=gait_frequency,
         headless=headless,
         controller_type=controller,
         slow_motion=slow_motion,
-        sim_frequency=sim_frequency
+        sim_frequency=sim_frequency,
+        tui=tui
     ))
     
     logger.info("🏁 Simulation finished")

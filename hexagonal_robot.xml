@@ -1,7 +1,7 @@
 <mujoco model="hexagonal_robot">
   <compiler angle="radian" meshdir="assets" texturedir="assets"/>
   
-  <option timestep="0.002" integrator="RK4"/>
+  <option timestep="0.0005" integrator="RK4"/>
   
   <!-- Disable self-collisions -->
   <contact>
@@ -23,21 +23,21 @@
     <geom name="ground" type="plane" size="5 5 0.1" material="matplane"/>
     
     <!-- Hexagonal base body -->
-    <body name="base" pos="0 0 0.3">
+    <body name="base" pos="0 0 0.5">
       <!-- Free joint allows 6 DOF motion in world -->
       <freejoint/>
       <!-- Hexagonal base -->
-      <geom name="base_geom" type="box" size="0.2 0.4 0.05" rgba="0.3 0.3 0.8 1" mass="2.0" contype="0" conaffinity="0"/>
+      <geom name="base_geom" type="box" size="0.2 0.4 0.05" rgba="0.3 0.3 0.8 1" mass="8.0" contype="1" conaffinity="1"/>
       
       <!-- Northeast leg (corner) -->
       <body name="northeast_base" pos="0.2 0.4 0" euler="0 0 0.524">
-        <joint name="northeast_yaw" type="hinge" axis="0 0 1" range="-1.57 1.57" damping="0.1"/>
-        <joint name="northeast_hip_pitch" type="hinge" axis="0 1 0" range="-1.57 1.57" damping="0.1"/>
+        <joint name="northeast_yaw" type="hinge" axis="0 0 1" range="-1.57 1.57" damping="1.0"/>
+        <joint name="northeast_hip_pitch" type="hinge" axis="0 1 0" range="-2.36 0.785" damping="1.0"/>
         <geom name="northeast_upper" type="capsule" size="0.03" fromto="0 0 0 0 0 -0.1875" rgba="0.8 0.3 0.3 1" mass="0.5" contype="0" conaffinity="0"/>
         
         <body name="northeast_lower" pos="0 0 -0.1875">
-          <joint name="northeast_knee_pitch" type="hinge" axis="0 1 0" range="-2.0 0.5" damping="0.1"/>
-          <geom name="northeast_lower_geom" type="capsule" size="0.025" fromto="0 0 0 0 0 -0.1875" rgba="0.3 0.8 0.3 1" mass="0.3" contype="0" conaffinity="0"/>
+          <joint name="northeast_knee_pitch" type="hinge" axis="0 1 0" range="0.0 1.57" damping="1.0"/>
+          <geom name="northeast_lower_geom" type="capsule" size="0.025" fromto="0 0 0 0 0 -0.1875" rgba="0.3 0.8 0.3 1" mass="0.4" contype="0" conaffinity="0"/>
           
           <body name="northeast_foot" pos="0 0 -0.1875">
             <geom name="northeast_foot_geom" type="sphere" size="0.05" rgba="0.8 0.8 0.3 1" mass="0.1" contype="1" conaffinity="1"/>
@@ -47,13 +47,13 @@
       
       <!-- East leg (middle) -->
       <body name="east_base" pos="0.2 0.0 0" euler="0 0 1.571">
-        <joint name="east_yaw" type="hinge" axis="0 0 1" range="-1.57 1.57" damping="0.1"/>
-        <joint name="east_hip_pitch" type="hinge" axis="0 1 0" range="-1.57 1.57" damping="0.1"/>
+        <joint name="east_hip_pitch" type="hinge" axis="1 0 0" range="-2.36 0.785" damping="1.0"/>
+        <joint name="east_yaw" type="hinge" axis="0 1 0" range="-1.0 1.0" damping="1.0"/>
         <geom name="east_upper" type="capsule" size="0.03" fromto="0 0 0 0 0 -0.1875" rgba="0.8 0.3 0.3 1" mass="0.5" contype="0" conaffinity="0"/>
         
         <body name="east_lower" pos="0 0 -0.1875">
-          <joint name="east_knee_pitch" type="hinge" axis="0 1 0" range="-2.0 0.5" damping="0.1"/>
-          <geom name="east_lower_geom" type="capsule" size="0.025" fromto="0 0 0 0 0 -0.1875" rgba="0.3 0.8 0.3 1" mass="0.3" contype="0" conaffinity="0"/>
+          <joint name="east_knee_pitch" type="hinge" axis="1 0 0" range="0.0 1.57" damping="1.0"/>
+          <geom name="east_lower_geom" type="capsule" size="0.025" fromto="0 0 0 0 0 -0.1875" rgba="0.3 0.8 0.3 1" mass="0.4" contype="0" conaffinity="0"/>
           
           <body name="east_foot" pos="0 0 -0.1875">
             <geom name="east_foot_geom" type="sphere" size="0.05" rgba="0.8 0.8 0.3 1" mass="0.1" contype="1" conaffinity="1"/>
@@ -63,13 +63,13 @@
       
       <!-- Southeast leg (corner) -->
       <body name="southeast_base" pos="0.2 -0.4 0" euler="0 0 2.618">
-        <joint name="southeast_yaw" type="hinge" axis="0 0 1" range="-1.57 1.57" damping="0.1"/>
-        <joint name="southeast_hip_pitch" type="hinge" axis="0 1 0" range="-1.57 1.57" damping="0.1"/>
+        <joint name="southeast_yaw" type="hinge" axis="0 0 1" range="-1.57 1.57" damping="1.0"/>
+        <joint name="southeast_hip_pitch" type="hinge" axis="0 1 0" range="-0.785 2.36" damping="1.0"/>
         <geom name="southeast_upper" type="capsule" size="0.03" fromto="0 0 0 0 0 -0.1875" rgba="0.8 0.3 0.3 1" mass="0.5" contype="0" conaffinity="0"/>
         
         <body name="southeast_lower" pos="0 0 -0.1875">
-          <joint name="southeast_knee_pitch" type="hinge" axis="0 1 0" range="-2.0 0.5" damping="0.1"/>
-          <geom name="southeast_lower_geom" type="capsule" size="0.025" fromto="0 0 0 0 0 -0.1875" rgba="0.3 0.8 0.3 1" mass="0.3" contype="0" conaffinity="0"/>
+          <joint name="southeast_knee_pitch" type="hinge" axis="0 1 0" range="-1.57 0.0" damping="1.0"/>
+          <geom name="southeast_lower_geom" type="capsule" size="0.025" fromto="0 0 0 0 0 -0.1875" rgba="0.3 0.8 0.3 1" mass="0.4" contype="0" conaffinity="0"/>
           
           <body name="southeast_foot" pos="0 0 -0.1875">
             <geom name="southeast_foot_geom" type="sphere" size="0.05" rgba="0.8 0.8 0.3 1" mass="0.1" contype="1" conaffinity="1"/>
@@ -79,13 +79,13 @@
       
       <!-- Southwest leg (corner) -->
       <body name="southwest_base" pos="-0.2 -0.4 0" euler="0 0 3.665">
-        <joint name="southwest_yaw" type="hinge" axis="0 0 1" range="-1.57 1.57" damping="0.1"/>
-        <joint name="southwest_hip_pitch" type="hinge" axis="0 1 0" range="-1.57 1.57" damping="0.1"/>
+        <joint name="southwest_yaw" type="hinge" axis="0 0 1" range="-1.57 1.57" damping="1.0"/>
+        <joint name="southwest_hip_pitch" type="hinge" axis="0 1 0" range="-2.36 0.785" damping="1.0"/>
         <geom name="southwest_upper" type="capsule" size="0.03" fromto="0 0 0 0 0 -0.1875" rgba="0.8 0.3 0.3 1" mass="0.5" contype="0" conaffinity="0"/>
         
         <body name="southwest_lower" pos="0 0 -0.1875">
-          <joint name="southwest_knee_pitch" type="hinge" axis="0 1 0" range="-2.0 0.5" damping="0.1"/>
-          <geom name="southwest_lower_geom" type="capsule" size="0.025" fromto="0 0 0 0 0 -0.1875" rgba="0.3 0.8 0.3 1" mass="0.3" contype="0" conaffinity="0"/>
+          <joint name="southwest_knee_pitch" type="hinge" axis="0 1 0" range="0.0 1.57" damping="1.0"/>
+          <geom name="southwest_lower_geom" type="capsule" size="0.025" fromto="0 0 0 0 0 -0.1875" rgba="0.3 0.8 0.3 1" mass="0.4" contype="0" conaffinity="0"/>
           
           <body name="southwest_foot" pos="0 0 -0.1875">
             <geom name="southwest_foot_geom" type="sphere" size="0.05" rgba="0.8 0.8 0.3 1" mass="0.1" contype="1" conaffinity="1"/>
@@ -95,13 +95,13 @@
       
       <!-- West leg (middle) -->
       <body name="west_base" pos="-0.2 0 0" euler="0 0 4.712">
-        <joint name="west_yaw" type="hinge" axis="0 0 1" range="-1.57 1.57" damping="0.1"/>
-        <joint name="west_hip_pitch" type="hinge" axis="0 1 0" range="-1.57 1.57" damping="0.1"/>
+        <joint name="west_hip_pitch" type="hinge" axis="1 0 0" range="-2.36 0.785" damping="1.0"/>
+        <joint name="west_yaw" type="hinge" axis="0 1 0" range="-1.0 1.0" damping="1.0"/>
         <geom name="west_upper" type="capsule" size="0.03" fromto="0 0 0 0 0 -0.1875" rgba="0.8 0.3 0.3 1" mass="0.5" contype="0" conaffinity="0"/>
         
         <body name="west_lower" pos="0 0 -0.1875">
-          <joint name="west_knee_pitch" type="hinge" axis="0 1 0" range="-2.0 0.5" damping="0.1"/>
-          <geom name="west_lower_geom" type="capsule" size="0.025" fromto="0 0 0 0 0 -0.1875" rgba="0.3 0.8 0.3 1" mass="0.3" contype="0" conaffinity="0"/>
+          <joint name="west_knee_pitch" type="hinge" axis="1 0 0" range="0.0 1.57" damping="1.0"/>
+          <geom name="west_lower_geom" type="capsule" size="0.025" fromto="0 0 0 0 0 -0.1875" rgba="0.3 0.8 0.3 1" mass="0.4" contype="0" conaffinity="0"/>
           
           <body name="west_foot" pos="0 0 -0.1875">
             <geom name="west_foot_geom" type="sphere" size="0.05" rgba="0.8 0.8 0.3 1" mass="0.1" contype="1" conaffinity="1"/>
@@ -111,13 +111,13 @@
       
       <!-- Northwest leg (corner) -->
       <body name="northwest_base" pos="-0.2 0.4 0" euler="0 0 5.759">
-        <joint name="northwest_yaw" type="hinge" axis="0 0 1" range="-1.57 1.57" damping="0.1"/>
-        <joint name="northwest_hip_pitch" type="hinge" axis="0 1 0" range="-1.57 1.57" damping="0.1"/>
+        <joint name="northwest_yaw" type="hinge" axis="0 0 1" range="-1.57 1.57" damping="1.0"/>
+        <joint name="northwest_hip_pitch" type="hinge" axis="0 1 0" range="-0.785 2.36" damping="1.0"/>
         <geom name="northwest_upper" type="capsule" size="0.03" fromto="0 0 0 0 0 -0.1875" rgba="0.8 0.3 0.3 1" mass="0.5" contype="0" conaffinity="0"/>
         
         <body name="northwest_lower" pos="0 0 -0.1875">
-          <joint name="northwest_knee_pitch" type="hinge" axis="0 1 0" range="-2.0 0.5" damping="0.1"/>
-          <geom name="northwest_lower_geom" type="capsule" size="0.025" fromto="0 0 0 0 0 -0.1875" rgba="0.3 0.8 0.3 1" mass="0.3" contype="0" conaffinity="0"/>
+          <joint name="northwest_knee_pitch" type="hinge" axis="0 1 0" range="-1.57 0.0" damping="1.0"/>
+          <geom name="northwest_lower_geom" type="capsule" size="0.025" fromto="0 0 0 0 0 -0.1875" rgba="0.3 0.8 0.3 1" mass="0.4" contype="0" conaffinity="0"/>
           
           <body name="northwest_foot" pos="0 0 -0.1875">
             <geom name="northwest_foot_geom" type="sphere" size="0.05" rgba="0.8 0.8 0.3 1" mass="0.1" contype="1" conaffinity="1"/>
@@ -129,33 +129,33 @@
   
   <actuator>
     <!-- Northeast leg actuators -->
-    <motor name="northeast_yaw_motor" joint="northeast_yaw" gear="50" ctrlrange="-2.094 2.094"/>
-    <motor name="northeast_hip_pitch_motor" joint="northeast_hip_pitch" gear="100" ctrlrange="-2.094 2.094"/>
-    <motor name="northeast_knee_pitch_motor" joint="northeast_knee_pitch" gear="50" ctrlrange="-2.094 2.094"/>
+    <position name="northeast_yaw_motor" joint="northeast_yaw" ctrlrange="-1.57 1.57" kp="15" kv="0"/>
+    <position name="northeast_hip_pitch_motor" joint="northeast_hip_pitch" ctrlrange="-2.36 0.785" kp="15" kv="0"/>
+    <position name="northeast_knee_pitch_motor" joint="northeast_knee_pitch" ctrlrange="-1.57 1.57" kp="15" kv="0"/>
     
     <!-- East leg actuators -->
-    <motor name="east_yaw_motor" joint="east_yaw" gear="50" ctrlrange="-2.094 2.094"/>
-    <motor name="east_hip_pitch_motor" joint="east_hip_pitch" gear="100" ctrlrange="-2.094 2.094"/>
-    <motor name="east_knee_pitch_motor" joint="east_knee_pitch" gear="50" ctrlrange="-2.094 2.094"/>
+    <position name="east_yaw_motor" joint="east_yaw" ctrlrange="-1.0 1.0" kp="15" kv="0"/>
+    <position name="east_hip_pitch_motor" joint="east_hip_pitch" ctrlrange="-2.36 0.785" kp="15" kv="0"/>
+    <position name="east_knee_pitch_motor" joint="east_knee_pitch" ctrlrange="-1.57 1.57" kp="15" kv="0"/>
     
     <!-- Southeast leg actuators -->
-    <motor name="southeast_yaw_motor" joint="southeast_yaw" gear="50" ctrlrange="-2.094 2.094"/>
-    <motor name="southeast_hip_pitch_motor" joint="southeast_hip_pitch" gear="100" ctrlrange="-2.094 2.094"/>
-    <motor name="southeast_knee_pitch_motor" joint="southeast_knee_pitch" gear="50" ctrlrange="-2.094 2.094"/>
+    <position name="southeast_yaw_motor" joint="southeast_yaw" ctrlrange="-1.57 1.57" kp="15" kv="0"/>
+    <position name="southeast_hip_pitch_motor" joint="southeast_hip_pitch" ctrlrange="-0.785 2.36" kp="15" kv="0"/>
+    <position name="southeast_knee_pitch_motor" joint="southeast_knee_pitch" ctrlrange="-1.57 1.57" kp="15" kv="0"/>
     
     <!-- Southwest leg actuators -->
-    <motor name="southwest_yaw_motor" joint="southwest_yaw" gear="50" ctrlrange="-2.094 2.094"/>
-    <motor name="southwest_hip_pitch_motor" joint="southwest_hip_pitch" gear="100" ctrlrange="-2.094 2.094"/>
-    <motor name="southwest_knee_pitch_motor" joint="southwest_knee_pitch" gear="50" ctrlrange="-2.094 2.094"/>
+    <position name="southwest_yaw_motor" joint="southwest_yaw" ctrlrange="-1.57 1.57" kp="15" kv="0"/>
+    <position name="southwest_hip_pitch_motor" joint="southwest_hip_pitch" ctrlrange="-2.36 0.785" kp="15" kv="0"/>
+    <position name="southwest_knee_pitch_motor" joint="southwest_knee_pitch" ctrlrange="-1.57 1.57" kp="15" kv="0"/>
     
     <!-- West leg actuators -->
-    <motor name="west_yaw_motor" joint="west_yaw" gear="50" ctrlrange="-2.094 2.094"/>
-    <motor name="west_hip_pitch_motor" joint="west_hip_pitch" gear="100" ctrlrange="-2.094 2.094"/>
-    <motor name="west_knee_pitch_motor" joint="west_knee_pitch" gear="50" ctrlrange="-2.094 2.094"/>
+    <position name="west_yaw_motor" joint="west_yaw" ctrlrange="-1.0 1.0" kp="15" kv="0"/>
+    <position name="west_hip_pitch_motor" joint="west_hip_pitch" ctrlrange="-2.36 0.785" kp="15" kv="0"/>
+    <position name="west_knee_pitch_motor" joint="west_knee_pitch" ctrlrange="-1.57 1.57" kp="15" kv="0"/>
     
     <!-- Northwest leg actuators -->
-    <motor name="northwest_yaw_motor" joint="northwest_yaw" gear="50" ctrlrange="-2.094 2.094"/>
-    <motor name="northwest_hip_pitch_motor" joint="northwest_hip_pitch" gear="100" ctrlrange="-2.094 2.094"/>
-    <motor name="northwest_knee_pitch_motor" joint="northwest_knee_pitch" gear="50" ctrlrange="-2.094 2.094"/>
+    <position name="northwest_yaw_motor" joint="northwest_yaw" ctrlrange="-1.57 1.57" kp="15" kv="0"/>
+    <position name="northwest_hip_pitch_motor" joint="northwest_hip_pitch" ctrlrange="-0.785 2.36" kp="15" kv="0"/>
+    <position name="northwest_knee_pitch_motor" joint="northwest_knee_pitch" ctrlrange="-1.57 1.57" kp="15" kv="0"/>
   </actuator>
 </mujoco>

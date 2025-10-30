@@ -26,6 +26,7 @@ class HexapodMDP:
     control_min: jnp.ndarray = field(pytree_node=False)
     control_max: jnp.ndarray = field(pytree_node=False)
     discount: float = field(default=0.99, pytree_node=False)
+    cost_coefficients: dict = field(default_factory=dict, pytree_node=False)
     
     def __hash__(self):
         """Make HexapodMDP hashable for JAX compilation."""
@@ -58,12 +59,24 @@ class HexapodMDP:
             ctrl_min = jnp.full(n_ctrl, -1.0)
             ctrl_max = jnp.full(n_ctrl, 1.0)
         
+        # Default cost coefficients
+        default_coefficients = {
+            'forward_velocity': 10.0,
+            'height': 5.0,
+            'action_penalty': 0.1,
+            'stability': 5.0,
+            'fall_penalty': 100.0,
+            'joint_deviation': 1.0,
+            'orientation': 2.0,
+        }
+        
         return cls(
             xml_path=xml_path,
             dt=dt,
             n_ctrl=n_ctrl,
             control_min=ctrl_min,
-            control_max=ctrl_max
+            control_max=ctrl_max,
+            cost_coefficients=default_coefficients
         )
     
     def empty_control(self) -> jnp.ndarray:
@@ -138,37 +151,160 @@ class HexapodMDP:
         
         return HexapodState(qpos=new_qpos, qvel=new_qvel)
     
-    def cost(self, state: HexapodState, control: jnp.ndarray, key: JaxRandomKey) -> float:
-        """Calculate cost (negative reward) - pure function"""
-        # Extract relevant state information
-        base_pos = state.qpos[:3]  # x, y, z position of base
-        base_quat = state.qpos[3:7]  # quaternion orientation
-        base_vel = state.qvel[:6]  # linear and angular velocity
-        
-        # Forward velocity reward (negative cost)
+    def _cost_forward_velocity(self, state: HexapodState, control: jnp.ndarray, key: JaxRandomKey) -> float:
+        """Forward velocity reward component"""
+        base_vel = state.qvel[:6]
         forward_velocity = base_vel[0]
-        velocity_reward = forward_velocity * 10.0
-        
-        # Height reward (staying upright)
+        return -forward_velocity  # Negative because we want to maximize forward velocity
+    
+    def _cost_height(self, state: HexapodState, control: jnp.ndarray, key: JaxRandomKey) -> float:
+        """Height maintenance reward component"""
+        base_pos = state.qpos[:3]
         height = base_pos[2]
-        height_reward = jnp.maximum(0, height - 0.1) * 5.0
+        return -jnp.maximum(0, height - 0.1)  # Negative because we want to maximize height above 0.1
+    
+    def _cost_action_penalty(self, state: HexapodState, control: jnp.ndarray, key: JaxRandomKey) -> float:
+        """Action penalty for deviation from default/rest joint target positions"""
+        # Create target control values (target joint angles) - same as joint deviation penalty
+        target_controls = jnp.zeros_like(control)
         
-        # Action penalty
-        action_penalty = jnp.sum(jnp.square(control)) * 0.1
+        # For a 6-legged hexapod with 3 actuators per leg = 18 total actuators
+        # Each leg has: yaw, hip_pitch, knee_pitch actuators (in that order)
+        # Knee actuators are at indices: 2, 5, 8, 11, 14, 17 (every 3rd starting from 2)
+        if len(control) >= 18:
+            knee_indices = jnp.array([2, 5, 8, 11, 14, 17])
+            # Knee actuators should target the standing pose angle (-0.525)
+            target_controls = target_controls.at[knee_indices].set(-0.525)
         
-        # Stability penalty (approximate roll and pitch from quaternion)
+        # Calculate squared deviation from target control values
+        return jnp.sum(jnp.square(control - target_controls))
+    
+    def _cost_stability(self, state: HexapodState, control: jnp.ndarray, key: JaxRandomKey) -> float:
+        """Stability penalty (roll and pitch)"""
+        base_quat = state.qpos[3:7]
         qw, qx, qy, qz = base_quat
         # Approximate small angle roll/pitch
-        roll_approx = 2 * qx  # approximate for small angles
-        pitch_approx = 2 * qy  # approximate for small angles
-        stability_penalty = (jnp.abs(roll_approx) + jnp.abs(pitch_approx)) * 5.0
+        roll_approx = 2 * qx
+        pitch_approx = 2 * qy
+        return jnp.abs(roll_approx) + jnp.abs(pitch_approx)
+    
+    def _cost_fall_penalty(self, state: HexapodState, control: jnp.ndarray, key: JaxRandomKey) -> float:
+        """Terminal penalty if robot falls"""
+        base_pos = state.qpos[:3]
+        height = base_pos[2]
+        return jnp.where(height < 0.05, 1.0, 0.0)  # Binary penalty
+    
+    def _cost_joint_deviation(self, state: HexapodState, control: jnp.ndarray, key: JaxRandomKey) -> float:
+        """Penalty for deviation from default/rest joint angles"""
+        # The default joint configuration for standing pose:
+        # - Base pose (7): [0, 0, 0.3, 1, 0, 0, 0] (position + quaternion) - skip these
+        # - Most joints: 0.0 radians (default)
+        # - Knee joints: -0.525 radians (for standing pose)
         
-        # Terminal cost if robot falls
-        fall_penalty = jnp.where(height < 0.05, 100.0, 0.0)
+        # Joint positions start after the base (skip first 7 elements: 3 pos + 4 quat)
+        joint_qpos = state.qpos[7:]  # All joint angles
         
-        # Return negative reward as cost
-        total_reward = velocity_reward + height_reward - action_penalty - stability_penalty - fall_penalty
-        return -total_reward
+        # Create target joint angles - most are 0.0, knees are -0.525
+        target_angles = jnp.zeros_like(joint_qpos)
+        
+        # The knee joints should be at -0.525. Based on the XML structure:
+        # Each leg has up to 3 joints: yaw, hip_pitch, knee_pitch
+        # Knee joints are typically every 3rd joint (index 2, 5, 8, 11, 14, 17)
+        # But let's be more robust and target specific patterns
+        
+        # For a 6-legged hexapod with 3 joints per leg = 18 joints total
+        # Knee joints are at indices: 2, 5, 8, 11, 14, 17 (every 3rd starting from 2)
+        if len(joint_qpos) >= 18:
+            knee_indices = jnp.array([2, 5, 8, 11, 14, 17])
+            target_angles = target_angles.at[knee_indices].set(-0.525)
+        
+        # Calculate squared deviation from target angles
+        deviation = jnp.sum(jnp.square(joint_qpos - target_angles))
+        return deviation
+    
+    def _cost_orientation(self, state: HexapodState, control: jnp.ndarray, key: JaxRandomKey) -> float:
+        """Penalty for deviation from upright orientation (pitch and roll only, allow yaw)"""
+        # Base quaternion: qpos[3:7] = [qw, qx, qy, qz]
+        base_quat = state.qpos[3:7]
+        qw, qx, qy, qz = base_quat
+        
+        # The default/target orientation is upright: [1, 0, 0, 0] (no rotation)
+        # We want to penalize pitch and roll but allow yaw rotation
+        
+        # Method 1: Direct penalty on qx and qy components
+        # For small angles, qx ≈ roll/2 and qy ≈ pitch/2
+        # So penalizing qx^2 + qy^2 penalizes roll and pitch while allowing qz (yaw)
+        pitch_roll_penalty = jnp.square(qx) + jnp.square(qy)
+        
+        # Alternative method using rotation matrices (more accurate for larger angles):
+        # Convert quaternion to rotation matrix and extract pitch/roll
+        # But for efficiency and simplicity, the direct method above works well
+        
+        return pitch_roll_penalty
+    
+    def cost(self, state: HexapodState, control: jnp.ndarray, key: JaxRandomKey) -> float:
+        """Calculate total cost by combining all subcost functions with their coefficients"""
+        total_cost = 0.0
+        
+        # Dynamically find all _cost_* methods and apply them
+        for name, coeff in self.cost_coefficients.items():
+            cost_method_name = f"_cost_{name}"
+            if hasattr(self, cost_method_name):
+                cost_method = getattr(self, cost_method_name)
+                subcost = cost_method(state, control, key)
+                total_cost += coeff * subcost
+            else:
+                # Warn about missing cost function but don't fail
+                pass
+        
+        return total_cost
+    
+    def get_cost_breakdown(self, state: HexapodState, control: jnp.ndarray, key: JaxRandomKey) -> dict:
+        """Return breakdown of individual cost components for debugging/tuning"""
+        breakdown = {}
+        
+        for name, coeff in self.cost_coefficients.items():
+            cost_method_name = f"_cost_{name}"
+            if hasattr(self, cost_method_name):
+                cost_method = getattr(self, cost_method_name)
+                subcost = cost_method(state, control, key)
+                breakdown[name] = {
+                    'raw_cost': float(subcost),
+                    'coefficient': coeff,
+                    'weighted_cost': float(coeff * subcost)
+                }
+        
+        breakdown['total_cost'] = float(self.cost(state, control, key))
+        return breakdown
+    
+    def update_cost_coefficient(self, name: str, value: float):
+        """Update a cost coefficient for live tuning - DEPRECATED: Use update_mdp_coefficients instead"""
+        self.cost_coefficients[name] = value
+    
+    def with_updated_coefficients(self, **coefficient_updates) -> 'HexapodMDP':
+        """
+        Create a new MDP instance with updated cost coefficients (JAX-compatible).
+        
+        Args:
+            **coefficient_updates: Keyword arguments for coefficient updates
+                                 e.g., forward_velocity=0.1, height=5.0
+        
+        Returns:
+            New HexapodMDP instance with updated coefficients
+        """
+        new_coefficients = self.cost_coefficients.copy()
+        new_coefficients.update(coefficient_updates)
+        
+        return self.replace(cost_coefficients=new_coefficients)
+    
+    def list_cost_functions(self) -> list:
+        """List all available cost function names"""
+        cost_methods = []
+        for attr_name in dir(self):
+            if attr_name.startswith('_cost_') and callable(getattr(self, attr_name)):
+                cost_name = attr_name[6:]  # Remove '_cost_' prefix
+                cost_methods.append(cost_name)
+        return cost_methods
 
 
 def simple_walking_pattern(step: int, n_ctrl: int) -> jnp.ndarray:
