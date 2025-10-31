@@ -75,7 +75,9 @@ def create_ars_optimizer(optimizer_params: dict) -> OptaxOptimizer:
     return optimizer
 
 
-def create_planner(mdp: HexapodMDP, optimizer_params: dict) -> StepperPlanner:
+def create_planner(
+    mdp: HexapodMDP, optimizer_params: dict, episode_length: int
+) -> StepperPlanner:
     """Create StepperPlanner with ARS optimizer.
 
     Parameters
@@ -83,7 +85,9 @@ def create_planner(mdp: HexapodMDP, optimizer_params: dict) -> StepperPlanner:
     mdp : HexapodMDP
         MDP instance to plan for.
     optimizer_params : dict
-        Must contain: n_iter, n_plan_steps, and ARS parameters.
+        Must contain: n_iter and ARS parameters.
+    episode_length : int
+        Number of steps to plan for.
 
     Returns
     -------
@@ -96,7 +100,7 @@ def create_planner(mdp: HexapodMDP, optimizer_params: dict) -> StepperPlanner:
     planner = StepperPlanner(
         mdp=mdp,
         n_iter=optimizer_params['n_iter'],
-        n_plan_steps=optimizer_params['n_plan_steps'],
+        n_plan_steps=episode_length,
         warm_start=False,  # No warm start as requested
         optimizer=optimizer,
     )
@@ -153,14 +157,14 @@ def run_optimization_iterative(
     # Create planner with n_iter=1 for single-step optimization
     single_iter_params = optimizer_params.copy()
     single_iter_params['n_iter'] = 1
-    planner = create_planner(mdp, single_iter_params)
+    planner = create_planner(mdp, single_iter_params, episode_length)
 
     # Initialize optimizer carry
-    # Create initial plan as 2D array [n_plan_steps, n_ctrl]
+    # Create initial plan as 2D array [episode_length, n_ctrl]
     from seher.jax_util import tree_stack
 
     initial_plan = tree_stack(
-        [mdp.empty_control() for _ in range(single_iter_params['n_plan_steps'])]
+        [mdp.empty_control() for _ in range(episode_length)]
     )
     opt_carry = planner.optimizer.initial_carry(sample_parameter=initial_plan)
 
@@ -208,33 +212,40 @@ def run_optimization_iterative(
         if progress_callback:
             progress_callback(iteration, float(iter_cost))
 
-    # Update planner with optimized plan
-    final_planner_carry = planner.initial_carry()
-    final_planner_carry = final_planner_carry.replace(
-        stepper_carry=opt_carry
-    )
+    # Extract the optimized plan and run final evaluation
+    from seher.control.basic_policies import OpenLoopPolicy
 
-    # Create policy with optimized planner
-    # For simulation, we just use the plan, not re-optimize
-    policy = MPCPolicy(mdp=mdp, planner=planner)
+    optimized_plan = planner.decode_plan(opt_carry.current)
 
-    # Run final simulation with optimized policy
+    # Evaluate the optimized plan to get trajectory history
+    # This creates the history needed for playback
     if n_rollouts == 1:
-        jit_simulate = jax.jit(simulate, static_argnums=(0, 1, 2))
         key, subkey = jr.split(key)
-        history = jit_simulate(mdp, policy, episode_length, subkey)
+        policy = OpenLoopPolicy(plan=optimized_plan)
+        history = simulate(
+            mdp=mdp,
+            policy=policy,
+            n_steps=episode_length,
+            key=subkey,
+            initial_state=state,
+        )
         avg_cost = float(history.costs.sum())
         all_costs = history.costs.reshape(1, -1)
     else:
-        batch_simulate = jax.jit(
-            jax.vmap(simulate, in_axes=(None, None, None, 0)),
-            static_argnums=(0, 1, 2),
-        )
-        histories = batch_simulate(
-            mdp,
-            policy,
-            episode_length,
-            jr.split(key, n_rollouts),
+        # For multiple rollouts, evaluate the plan multiple times
+        def single_rollout(key):
+            policy = OpenLoopPolicy(plan=optimized_plan)
+            return simulate(
+                mdp=mdp,
+                policy=policy,
+                n_steps=episode_length,
+                key=key,
+                initial_state=state,
+            )
+
+        histories = jax.tree.map(
+            lambda *xs: jnp.stack(xs),
+            *[single_rollout(k) for k in jr.split(key, n_rollouts)]
         )
         history = jax.tree.map(lambda leaf: leaf[0], histories)
         avg_cost = float(histories.costs.sum(axis=1).mean())
@@ -245,7 +256,7 @@ def run_optimization_iterative(
 
 def run_optimization(
     mdp: HexapodMDP,
-    planner: StepperPlanner,
+    optimizer_params: dict,
     episode_length: int,
     n_rollouts: int,
     key: jr.PRNGKey,
@@ -256,8 +267,8 @@ def run_optimization(
     ----------
     mdp : HexapodMDP
         MDP instance.
-    planner : StepperPlanner
-        Configured planner.
+    optimizer_params : dict
+        Optimizer parameters.
     episode_length : int
         Number of timesteps to simulate.
     n_rollouts : int
@@ -278,6 +289,7 @@ def run_optimization(
     """
     import jax
 
+    planner = create_planner(mdp, optimizer_params, episode_length)
     policy = MPCPolicy(mdp=mdp, planner=planner)
 
     if n_rollouts == 1:

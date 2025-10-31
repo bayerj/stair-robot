@@ -17,7 +17,6 @@ from .config import (
 )
 from .utils import (
     create_mdp,
-    create_planner,
     run_optimization,
     save_trajectory,
 )
@@ -113,14 +112,13 @@ def _objective(
         print("Optimizer params:", optimizer_params)
         print("Cost coefficients:", cost_coefficients)
 
-    # Create MDP and planner
+    # Create MDP
     mdp = create_mdp(cost_coefficients, dt=DEFAULT_DT)
-    planner = create_planner(mdp, optimizer_params)
 
     # Run optimization
     history, avg_cost, all_costs = run_optimization(
         mdp=mdp,
-        planner=planner,
+        optimizer_params=optimizer_params,
         episode_length=episode_length,
         n_rollouts=n_rollouts,
         key=key,
@@ -290,10 +288,9 @@ def tune_run_best(
         print(f"  {key}: {value}")
     print()
 
-    # Create MDP and planner
-    print("Creating MDP and planner...")
+    # Create MDP
+    print("Creating MDP...")
     mdp = create_mdp(cost_coefficients, dt=DEFAULT_DT)
-    planner = create_planner(mdp, optimizer_params)
     print("Done!")
     print()
 
@@ -302,7 +299,7 @@ def tune_run_best(
     key = jr.PRNGKey(seed)
     history, avg_cost, _all_costs = run_optimization(
         mdp=mdp,
-        planner=planner,
+        optimizer_params=optimizer_params,
         episode_length=episode_length,
         n_rollouts=n_rollouts,
         key=key,

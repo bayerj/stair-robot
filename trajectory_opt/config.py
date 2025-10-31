@@ -18,7 +18,6 @@ DEFAULT_OPTIMIZER_PARAMS = {
     'std': 0.5,
     'n_perturbations': 8,
     'top_k_ratio': 0.5,
-    'n_plan_steps': 30,
 }
 
 # Minimal test configuration for quick testing
@@ -28,7 +27,6 @@ MINIMAL_OPTIMIZER_PARAMS = {
     'std': 0.5,
     'n_perturbations': 4,  # Increased from 2
     'top_k_ratio': 0.5,
-    'n_plan_steps': 10,  # Increased from 5
 }
 
 # Default optimization settings
@@ -47,7 +45,6 @@ OPTUNA_OPTIMIZER_SEARCH_SPACE = {
     'std': {'type': 'float', 'low': 0.1, 'high': 2.0, 'step': 0.1},
     'n_perturbations': {'type': 'int', 'low': 4, 'high': 16, 'step': 2},
     'top_k_ratio': {'type': 'float', 'low': 0.1, 'high': 0.8},
-    'n_plan_steps': {'type': 'int', 'low': 10, 'high': 50, 'step': 5},
 }
 
 OPTUNA_COST_COEFFICIENT_SEARCH_SPACE = {
