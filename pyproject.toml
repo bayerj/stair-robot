@@ -13,7 +13,11 @@ dependencies = [
     "scipy>=1.10.0",
     "defopt>=6.4.0",
     "rich>=13.0.0",
+    "textual>=0.45.0",
     "seher",
+    "ipython>=9.6.0",
+    "dill>=0.3.0",
+    "plotext>=5.3.2",
 ]
 
 [tool.hatch.metadata]
@@ -25,3 +29,60 @@ seher = { path = "/Users/bayerj/devel/seher", editable = true }
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
+[tool.uv]
+dev-dependencies = [
+    "ruff>=0.9.9",
+    "pytest>=8.4.2",
+    "ipdb>=0.13.13",
+    "pre-commit>=4.1.0",
+    "pytest-cov>=6.0.0",
+    "python-lsp-ruff>=2.2.2",
+    "python-lsp-server[all]>=1.12.2",
+    "pyright>=1.1.400",
+    "pytest-xdist>=3.7.0",
+]
+
+[tool.ruff]
+lint.select = [
+    "E",  # pycodestyle errors
+    "W",  # pycodestyle warnings
+    "F",  # pyflakes
+    "N",  # pep8-naming
+    "I",  # isort
+    "D",  # pydocstyle
+]
+
+lint.ignore = [
+    "D203",  # incorrect-blank-line-before-class (conflicts with D211)
+    "D213",  # multi-line-summary-second-line (conflicts with D212)
+]
+
+# Allow autofix for all enabled rules (when `--fix`) is provided.
+lint.fixable = [
+    "I"  # isort rules: I001 unsorted-imports, I002	missing-required-import
+]
+lint.unfixable = []
+
+# Allow unused variables when underscore-prefixed.
+lint.dummy-variable-rgx = "^(_+|(_+[a-zA-Z0-9_]*[a-zA-Z0-9]+?))$"
+
+# Exclude a variety of commonly ignored directories.
+exclude = [
+    ".git",
+    ".ruff_cache",
+    ".venv",
+    ".vscode",
+    ".pytest_cache",
+    ".coverage",
+]
+
+# Same as Black.
+line-length = 79
+
+# Assume Python 3.12.
+target-version = "py312"
+
+[tool.ruff.lint.isort]
+force-sort-within-sections = false
+section-order = ["future", "standard-library", "third-party", "first-party", "local-folder"]

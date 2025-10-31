@@ -1,0 +1,380 @@
+"""Shared utilities for trajectory optimization."""
+
+import functools
+import sys
+from pathlib import Path
+
+import dill
+import jax.random as jr
+import optax
+from seher.ars import ars_value_and_grad
+from seher.control.mpc import MPCPolicy
+from seher.control.stepper_planner import StepperPlanner
+from seher.simulate import simulate
+from seher.stepper.optax import OptaxOptimizer
+
+# Add parent directory to path to import hexapod_mdp
+sys.path.insert(0, str(Path(__file__).parent.parent))
+from hexapod_mdp import HexapodMDP
+
+
+def create_mdp(cost_coefficients: dict, dt: float = 0.05) -> HexapodMDP:
+    """Create HexapodMDP with specified cost coefficients.
+
+    Parameters
+    ----------
+    cost_coefficients : dict
+        Cost function coefficients to use.
+    dt : float
+        Timestep for control (default: 0.05s = 20Hz).
+
+    Returns
+    -------
+    HexapodMDP
+        Configured MDP instance.
+
+    """
+    mdp = HexapodMDP.create("hexagonal_robot.xml", dt=dt)
+    mdp = mdp.replace(cost_coefficients=cost_coefficients)
+    return mdp
+
+
+def create_ars_optimizer(optimizer_params: dict) -> OptaxOptimizer:
+    """Create ARS-based optimizer with specified parameters.
+
+    Parameters
+    ----------
+    optimizer_params : dict
+        Must contain: learning_rate, std, n_perturbations, top_k_ratio
+
+    Returns
+    -------
+    OptaxOptimizer
+        Configured optimizer instance.
+
+    """
+    top_k = max(
+        1,
+        int(
+            optimizer_params['top_k_ratio']
+            * optimizer_params['n_perturbations']
+        ),
+    )
+
+    optimizer = OptaxOptimizer(
+        objective=None,  # Set by StepperPlanner
+        optimizer=optax.adam(optimizer_params['learning_rate']),
+        value_and_grad=functools.partial(
+            ars_value_and_grad,
+            std=optimizer_params['std'],
+            n_perturbations=optimizer_params['n_perturbations'],
+            top_k=top_k,
+        ),
+    )
+
+    return optimizer
+
+
+def create_planner(mdp: HexapodMDP, optimizer_params: dict) -> StepperPlanner:
+    """Create StepperPlanner with ARS optimizer.
+
+    Parameters
+    ----------
+    mdp : HexapodMDP
+        MDP instance to plan for.
+    optimizer_params : dict
+        Must contain: n_iter, n_plan_steps, and ARS parameters.
+
+    Returns
+    -------
+    StepperPlanner
+        Configured planner instance.
+
+    """
+    optimizer = create_ars_optimizer(optimizer_params)
+
+    planner = StepperPlanner(
+        mdp=mdp,
+        n_iter=optimizer_params['n_iter'],
+        n_plan_steps=optimizer_params['n_plan_steps'],
+        warm_start=False,  # No warm start as requested
+        optimizer=optimizer,
+    )
+
+    return planner
+
+
+def run_optimization_iterative(
+    mdp: HexapodMDP,
+    optimizer_params: dict,
+    episode_length: int,
+    n_rollouts: int,
+    key: jr.PRNGKey,
+    progress_callback=None,
+):
+    """Run trajectory optimization with manual iteration loop.
+
+    This allows progress updates after each optimizer iteration by
+    compiling only a single optimization step and looping in Python.
+
+    Parameters
+    ----------
+    mdp : HexapodMDP
+        MDP instance.
+    optimizer_params : dict
+        Optimizer parameters including n_iter.
+    episode_length : int
+        Number of timesteps to simulate.
+    n_rollouts : int
+        Number of rollouts to average over.
+    key : jr.PRNGKey
+        Random key for simulation.
+    progress_callback : callable, optional
+        Called with (iteration, cost) after each optimizer iteration.
+
+    Returns
+    -------
+    history : History
+        Simulation history.
+    avg_cost : float
+        Average cost.
+    all_costs : jnp.ndarray
+        Cost array.
+    iteration_costs : list[float]
+        Cost after each optimizer iteration.
+
+    """
+    import jax
+    import jax.numpy as jnp
+    from seher.control.stepper_planner import calc_costs_of_plan
+
+    n_total_iters = optimizer_params['n_iter']
+
+    # Create planner with n_iter=1 for single-step optimization
+    single_iter_params = optimizer_params.copy()
+    single_iter_params['n_iter'] = 1
+    planner = create_planner(mdp, single_iter_params)
+
+    # Initialize optimizer carry
+    # Create initial plan as 2D array [n_plan_steps, n_ctrl]
+    from seher.jax_util import tree_stack
+
+    initial_plan = tree_stack(
+        [mdp.empty_control() for _ in range(single_iter_params['n_plan_steps'])]
+    )
+    opt_carry = planner.optimizer.initial_carry(sample_parameter=initial_plan)
+
+    # JIT compile single optimizer step
+    def single_opt_step(carry, state, step_key):
+        """Run one optimizer iteration."""
+        # Create objective function (must match ARS signature: parameter, problem_data, key)
+        def objective(parameter, problem_data, key):
+            plan = planner.decode_plan(parameter)
+            cost = calc_costs_of_plan(mdp, plan, problem_data, key)
+            return cost, None
+
+        # Update optimizer with objective
+        optimizer = planner.optimizer.replace(objective=objective)
+
+        # Single optimization step
+        new_carry, new_params, _ = optimizer(
+            carry=carry,
+            problem_data=state,
+            key=step_key,
+        )
+
+        # Calculate cost for reporting
+        plan = planner.decode_plan(new_params)
+        cost = calc_costs_of_plan(mdp, plan, state, step_key)
+
+        return new_carry, cost
+
+    jit_opt_step = jax.jit(single_opt_step)
+
+    # Initialize state
+    key, subkey = jr.split(key)
+    state = mdp.init(subkey)
+
+    # Manual optimization loop
+    iteration_costs = []
+    for iteration in range(n_total_iters):
+        key, subkey = jr.split(key)
+
+        # Single optimization step (JIT'd)
+        opt_carry, iter_cost = jit_opt_step(opt_carry, state, subkey)
+        iteration_costs.append(float(iter_cost))
+
+        # Progress callback
+        if progress_callback:
+            progress_callback(iteration, float(iter_cost))
+
+    # Update planner with optimized plan
+    final_planner_carry = planner.initial_carry()
+    final_planner_carry = final_planner_carry.replace(
+        stepper_carry=opt_carry
+    )
+
+    # Create policy with optimized planner
+    # For simulation, we just use the plan, not re-optimize
+    policy = MPCPolicy(mdp=mdp, planner=planner)
+
+    # Run final simulation with optimized policy
+    if n_rollouts == 1:
+        jit_simulate = jax.jit(simulate, static_argnums=(0, 1, 2))
+        key, subkey = jr.split(key)
+        history = jit_simulate(mdp, policy, episode_length, subkey)
+        avg_cost = float(history.costs.sum())
+        all_costs = history.costs.reshape(1, -1)
+    else:
+        batch_simulate = jax.jit(
+            jax.vmap(simulate, in_axes=(None, None, None, 0)),
+            static_argnums=(0, 1, 2),
+        )
+        histories = batch_simulate(
+            mdp,
+            policy,
+            episode_length,
+            jr.split(key, n_rollouts),
+        )
+        history = jax.tree.map(lambda leaf: leaf[0], histories)
+        avg_cost = float(histories.costs.sum(axis=1).mean())
+        all_costs = histories.costs
+
+    return history, avg_cost, all_costs, iteration_costs
+
+
+def run_optimization(
+    mdp: HexapodMDP,
+    planner: StepperPlanner,
+    episode_length: int,
+    n_rollouts: int,
+    key: jr.PRNGKey,
+):
+    """Run trajectory optimization and return history.
+
+    Parameters
+    ----------
+    mdp : HexapodMDP
+        MDP instance.
+    planner : StepperPlanner
+        Configured planner.
+    episode_length : int
+        Number of timesteps to simulate.
+    n_rollouts : int
+        Number of rollouts to average over.
+    key : jr.PRNGKey
+        Random key for simulation.
+
+    Returns
+    -------
+    history : History
+        Simulation history (single rollout if n_rollouts=1, otherwise
+        first rollout).
+    avg_cost : float
+        Average cost across all rollouts.
+    all_costs : jnp.ndarray
+        Cost array for all rollouts (shape: [n_rollouts, episode_length]).
+
+    """
+    import jax
+
+    policy = MPCPolicy(mdp=mdp, planner=planner)
+
+    if n_rollouts == 1:
+        # Single rollout with JIT
+        jit_simulate = jax.jit(
+            simulate,
+            static_argnums=(0, 1, 2),
+        )
+        history = jit_simulate(
+            mdp,
+            policy,
+            episode_length,
+            key,
+        )
+        avg_cost = float(history.costs.sum())
+        all_costs = history.costs.reshape(1, -1)
+    else:
+        # Multiple rollouts (batched)
+        batch_simulate = jax.jit(
+            jax.vmap(simulate, in_axes=(None, None, None, 0)),
+            static_argnums=(0, 1, 2),
+        )
+        histories = batch_simulate(
+            mdp,
+            policy,
+            episode_length,
+            jr.split(key, n_rollouts),
+        )
+
+        # Return first rollout as representative history
+        history = jax.tree.map(lambda leaf: leaf[0], histories)
+        avg_cost = float(histories.costs.sum(axis=1).mean())
+        all_costs = histories.costs
+
+    return history, avg_cost, all_costs
+
+
+def save_trajectory(
+    path: str,
+    history,
+    optimizer_params: dict,
+    cost_coefficients: dict,
+    final_cost: float,
+    cost_history: list[float],
+    dt: float,
+):
+    """Save optimized trajectory to dill file.
+
+    Parameters
+    ----------
+    path : str
+        Output file path.
+    history : History
+        Simulation history from seher.
+    optimizer_params : dict
+        Optimizer parameters used.
+    cost_coefficients : dict
+        Cost coefficients used.
+    final_cost : float
+        Final total cost.
+    cost_history : list[float]
+        Cost per optimization iteration.
+    dt : float
+        Timestep used during optimization.
+
+    """
+    data = {
+        'history': history,
+        'optimizer_params': optimizer_params,
+        'cost_coefficients': cost_coefficients,
+        'final_cost': final_cost,
+        'cost_history': cost_history,
+        'dt': dt,
+    }
+
+    with open(path, 'wb') as f:
+        dill.dump(data, f)
+
+    print(f"Trajectory saved to {path}")
+
+
+def load_trajectory(path: str) -> dict:
+    """Load trajectory from dill file.
+
+    Parameters
+    ----------
+    path : str
+        Input file path.
+
+    Returns
+    -------
+    dict
+        Dictionary containing history, optimizer_params, cost_coefficients,
+        final_cost, and cost_history.
+
+    """
+    with open(path, 'rb') as f:
+        data = dill.load(f)
+
+    return data

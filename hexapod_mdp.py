@@ -166,16 +166,25 @@ class HexapodMDP:
     def _cost_action_penalty(self, state: HexapodState, control: jnp.ndarray, key: JaxRandomKey) -> float:
         """Action penalty for deviation from default/rest joint target positions"""
         # Create target control values (target joint angles) - same as joint deviation penalty
-        target_controls = jnp.zeros_like(control)
-        
         # For a 6-legged hexapod with 3 actuators per leg = 18 total actuators
         # Each leg has: yaw, hip_pitch, knee_pitch actuators (in that order)
         # Knee actuators are at indices: 2, 5, 8, 11, 14, 17 (every 3rd starting from 2)
-        if len(control) >= 18:
-            knee_indices = jnp.array([2, 5, 8, 11, 14, 17])
-            # Knee actuators should target the standing pose angle (-0.525)
-            target_controls = target_controls.at[knee_indices].set(-0.525)
-        
+        # Most targets are 0.0, but knees should be at -0.525 for standing pose
+
+        # Build target array assuming we have 18 actuators (pad if needed)
+        # This is JAX-trace-safe as it doesn't check runtime shapes
+        target_controls = jnp.array([
+            0.0, 0.0, -0.525,  # northeast leg: yaw, hip, knee
+            0.0, 0.0, -0.525,  # east leg
+            0.0, 0.0, -0.525,  # southeast leg
+            0.0, 0.0, -0.525,  # southwest leg
+            0.0, 0.0, -0.525,  # west leg
+            0.0, 0.0, -0.525,  # northwest leg
+        ])
+
+        # Slice to match control size (handles cases with fewer actuators)
+        target_controls = target_controls[:control.size]
+
         # Calculate squared deviation from target control values
         return jnp.sum(jnp.square(control - target_controls))
     
@@ -200,24 +209,25 @@ class HexapodMDP:
         # - Base pose (7): [0, 0, 0.3, 1, 0, 0, 0] (position + quaternion) - skip these
         # - Most joints: 0.0 radians (default)
         # - Knee joints: -0.525 radians (for standing pose)
-        
+
         # Joint positions start after the base (skip first 7 elements: 3 pos + 4 quat)
         joint_qpos = state.qpos[7:]  # All joint angles
-        
-        # Create target joint angles - most are 0.0, knees are -0.525
-        target_angles = jnp.zeros_like(joint_qpos)
-        
-        # The knee joints should be at -0.525. Based on the XML structure:
-        # Each leg has up to 3 joints: yaw, hip_pitch, knee_pitch
-        # Knee joints are typically every 3rd joint (index 2, 5, 8, 11, 14, 17)
-        # But let's be more robust and target specific patterns
-        
-        # For a 6-legged hexapod with 3 joints per leg = 18 joints total
-        # Knee joints are at indices: 2, 5, 8, 11, 14, 17 (every 3rd starting from 2)
-        if len(joint_qpos) >= 18:
-            knee_indices = jnp.array([2, 5, 8, 11, 14, 17])
-            target_angles = target_angles.at[knee_indices].set(-0.525)
-        
+
+        # Build target array assuming we have 18 joints (6 legs × 3 joints/leg)
+        # Each leg has: yaw, hip_pitch, knee_pitch
+        # This is JAX-trace-safe as it doesn't check runtime shapes
+        target_angles = jnp.array([
+            0.0, 0.0, -0.525,  # northeast leg
+            0.0, 0.0, -0.525,  # east leg
+            0.0, 0.0, -0.525,  # southeast leg
+            0.0, 0.0, -0.525,  # southwest leg
+            0.0, 0.0, -0.525,  # west leg
+            0.0, 0.0, -0.525,  # northwest leg
+        ])
+
+        # Slice to match joint_qpos size (handles cases with fewer joints)
+        target_angles = target_angles[:joint_qpos.size]
+
         # Calculate squared deviation from target angles
         deviation = jnp.sum(jnp.square(joint_qpos - target_angles))
         return deviation
