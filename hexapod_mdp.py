@@ -154,7 +154,8 @@ class HexapodMDP:
     def _cost_forward_velocity(self, state: HexapodState, control: jnp.ndarray, key: JaxRandomKey) -> float:
         """Forward velocity reward component"""
         base_vel = state.qvel[:6]
-        forward_velocity = base_vel[0]
+        # Y-axis is the long direction of the hexagonal base (size 0.2 x 0.4 x 0.05)
+        forward_velocity = base_vel[1]
         return -forward_velocity  # Negative because we want to maximize forward velocity
     
     def _cost_height(self, state: HexapodState, control: jnp.ndarray, key: JaxRandomKey) -> float:
