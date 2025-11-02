@@ -2471,7 +2471,7 @@ wheels = [
 [[package]]
 name = "seher"
 version = "0.1.0"
-source = { editable = "../seher" }
+source = { git = "ssh://git@github.com/bayerj/seher-closed.git?rev=93bd6585eb45bc45ae1cfec453cee851e29df629#93bd6585eb45bc45ae1cfec453cee851e29df629" }
 dependencies = [
     { name = "defopt" },
     { name = "dm-control" },
@@ -2489,26 +2489,6 @@ dependencies = [
     { name = "rich" },
     { name = "robot-descriptions" },
     { name = "scipy" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "defopt", specifier = ">=6.4.0" },
-    { name = "dm-control", specifier = ">=1.0.27" },
-    { name = "flax", specifier = ">=0.10.4" },
-    { name = "jax", specifier = ">=0.6.1" },
-    { name = "jaxlib", specifier = ">=0.6.1" },
-    { name = "matplotlib", specifier = ">=3.10.3" },
-    { name = "moviepy", specifier = ">=2.1.2" },
-    { name = "mujoco-mjx", specifier = ">=3.3.0" },
-    { name = "optax", specifier = ">=0.2.4" },
-    { name = "optuna", specifier = ">=4.2.1" },
-    { name = "optuna-dashboard", specifier = ">=0.17.0" },
-    { name = "playground", specifier = ">=0.0.3" },
-    { name = "plotext", specifier = ">=5.3.2" },
-    { name = "rich", specifier = ">=13.9.4" },
-    { name = "robot-descriptions", specifier = ">=1.15.0" },
-    { name = "scipy", specifier = ">=1.15.2" },
 ]
 
 [[package]]
@@ -2678,7 +2658,7 @@ requires-dist = [
     { name = "plotext", specifier = ">=5.3.2" },
     { name = "rich", specifier = ">=13.0.0" },
     { name = "scipy", specifier = ">=1.10.0" },
-    { name = "seher", editable = "../seher" },
+    { name = "seher", git = "ssh://git@github.com/bayerj/seher-closed.git?rev=93bd6585eb45bc45ae1cfec453cee851e29df629" },
     { name = "textual", specifier = ">=0.45.0" },
 ]
 

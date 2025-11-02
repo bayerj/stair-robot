@@ -24,7 +24,8 @@ dependencies = [
 allow-direct-references = true
 
 [tool.uv.sources]
-seher = { path = "/Users/bayerj/devel/seher", editable = true }
+#seher = { path = "/Users/bayerj/devel/seher", editable = true }
+seher = { git = "ssh://git@github.com/bayerj/seher-closed.git", rev = "93bd6585eb45bc45ae1cfec453cee851e29df629" }
 
 [build-system]
 requires = ["hatchling"]
