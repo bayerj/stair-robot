@@ -19,8 +19,8 @@
   </asset>
   
   <worldbody>
-    <!-- Ground plane -->
-    <geom name="ground" type="plane" size="5 5 0.1" material="matplane"/>
+    <!-- Ground plane with high friction -->
+    <geom name="ground" type="plane" size="5 5 0.1" material="matplane" friction="2 0.005 0.0001"/>
     
     <!-- Hexagonal base body -->
     <body name="base" pos="0 0 0.5">
@@ -40,7 +40,7 @@
           <geom name="northeast_lower_geom" type="capsule" size="0.025" fromto="0 0 0 0 0 -0.1875" rgba="0.3 0.8 0.3 1" mass="0.4" contype="0" conaffinity="0"/>
           
           <body name="northeast_foot" pos="0 0 -0.1875">
-            <geom name="northeast_foot_geom" type="sphere" size="0.05" rgba="0.8 0.8 0.3 1" mass="0.1" contype="1" conaffinity="1"/>
+            <geom name="northeast_foot_geom" type="sphere" size="0.05" rgba="0.8 0.8 0.3 1" mass="0.1" contype="1" conaffinity="1" friction="2 0.005 0.0001"/>
           </body>
         </body>
       </body>
@@ -56,7 +56,7 @@
           <geom name="east_lower_geom" type="capsule" size="0.025" fromto="0 0 0 0 0 -0.1875" rgba="0.3 0.8 0.3 1" mass="0.4" contype="0" conaffinity="0"/>
           
           <body name="east_foot" pos="0 0 -0.1875">
-            <geom name="east_foot_geom" type="sphere" size="0.05" rgba="0.8 0.8 0.3 1" mass="0.1" contype="1" conaffinity="1"/>
+            <geom name="east_foot_geom" type="sphere" size="0.05" rgba="0.8 0.8 0.3 1" mass="0.1" contype="1" conaffinity="1" friction="2 0.005 0.0001"/>
           </body>
         </body>
       </body>
@@ -72,7 +72,7 @@
           <geom name="southeast_lower_geom" type="capsule" size="0.025" fromto="0 0 0 0 0 -0.1875" rgba="0.3 0.8 0.3 1" mass="0.4" contype="0" conaffinity="0"/>
           
           <body name="southeast_foot" pos="0 0 -0.1875">
-            <geom name="southeast_foot_geom" type="sphere" size="0.05" rgba="0.8 0.8 0.3 1" mass="0.1" contype="1" conaffinity="1"/>
+            <geom name="southeast_foot_geom" type="sphere" size="0.05" rgba="0.8 0.8 0.3 1" mass="0.1" contype="1" conaffinity="1" friction="2 0.005 0.0001"/>
           </body>
         </body>
       </body>
@@ -88,7 +88,7 @@
           <geom name="southwest_lower_geom" type="capsule" size="0.025" fromto="0 0 0 0 0 -0.1875" rgba="0.3 0.8 0.3 1" mass="0.4" contype="0" conaffinity="0"/>
           
           <body name="southwest_foot" pos="0 0 -0.1875">
-            <geom name="southwest_foot_geom" type="sphere" size="0.05" rgba="0.8 0.8 0.3 1" mass="0.1" contype="1" conaffinity="1"/>
+            <geom name="southwest_foot_geom" type="sphere" size="0.05" rgba="0.8 0.8 0.3 1" mass="0.1" contype="1" conaffinity="1" friction="2 0.005 0.0001"/>
           </body>
         </body>
       </body>
@@ -104,7 +104,7 @@
           <geom name="west_lower_geom" type="capsule" size="0.025" fromto="0 0 0 0 0 -0.1875" rgba="0.3 0.8 0.3 1" mass="0.4" contype="0" conaffinity="0"/>
           
           <body name="west_foot" pos="0 0 -0.1875">
-            <geom name="west_foot_geom" type="sphere" size="0.05" rgba="0.8 0.8 0.3 1" mass="0.1" contype="1" conaffinity="1"/>
+            <geom name="west_foot_geom" type="sphere" size="0.05" rgba="0.8 0.8 0.3 1" mass="0.1" contype="1" conaffinity="1" friction="2 0.005 0.0001"/>
           </body>
         </body>
       </body>
@@ -120,7 +120,7 @@
           <geom name="northwest_lower_geom" type="capsule" size="0.025" fromto="0 0 0 0 0 -0.1875" rgba="0.3 0.8 0.3 1" mass="0.4" contype="0" conaffinity="0"/>
           
           <body name="northwest_foot" pos="0 0 -0.1875">
-            <geom name="northwest_foot_geom" type="sphere" size="0.05" rgba="0.8 0.8 0.3 1" mass="0.1" contype="1" conaffinity="1"/>
+            <geom name="northwest_foot_geom" type="sphere" size="0.05" rgba="0.8 0.8 0.3 1" mass="0.1" contype="1" conaffinity="1" friction="2 0.005 0.0001"/>
           </body>
         </body>
       </body>

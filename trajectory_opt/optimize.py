@@ -21,6 +21,7 @@ from .config import (
 )
 from .utils import (
     create_mdp,
+    extract_plan_from_trajectory,
     run_optimization_iterative,
     save_trajectory,
 )
@@ -33,6 +34,7 @@ def optimize(
     n_rollouts: int = DEFAULT_N_ROLLOUTS,
     seed: int = 42,
     minimal: bool = False,
+    from_trajectory: str = "",
 ):
     """Optimize a trajectory using ARS and save to file.
 
@@ -48,6 +50,10 @@ def optimize(
         Random seed (default: 42).
     minimal : bool
         Use minimal settings for quick testing (default: False).
+    from_trajectory : str
+        Path to previous trajectory file to warm-start from. If provided,
+        optimization will continue from the control plan in that file
+        (default: empty string = start from scratch).
 
     """
     # Use minimal settings if requested
@@ -83,6 +89,19 @@ def optimize(
     print(f"Number of Rollouts: {n_rollouts}")
     print(f"Random Seed: {seed}")
     print()
+
+    # Load initial plan if specified
+    initial_plan = None
+    if from_trajectory:
+        print(f"Loading initial plan from: {from_trajectory}")
+        try:
+            initial_plan = extract_plan_from_trajectory(from_trajectory)
+            print(f"Loaded plan with shape: {initial_plan.shape}")
+            print()
+        except Exception as e:
+            print(f"Error loading trajectory: {e}")
+            print("Starting from scratch instead.")
+            print()
 
     # Create MDP
     print("Creating MDP...")
@@ -143,6 +162,7 @@ def optimize(
                     n_rollouts=n_rollouts,
                     key=subkey,
                     progress_callback=progress_callback,
+                    initial_plan=initial_plan,
                 )
             )
 

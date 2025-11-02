@@ -115,6 +115,7 @@ def run_optimization_iterative(
     n_rollouts: int,
     key: jr.PRNGKey,
     progress_callback=None,
+    initial_plan=None,
 ):
     """Run trajectory optimization with manual iteration loop.
 
@@ -135,6 +136,10 @@ def run_optimization_iterative(
         Random key for simulation.
     progress_callback : callable, optional
         Called with (iteration, cost) after each optimizer iteration.
+    initial_plan : jnp.ndarray, optional
+        Initial control plan to warm-start from. If provided, must have
+        shape [episode_length, n_ctrl]. If None, starts from empty
+        controls.
 
     Returns
     -------
@@ -163,9 +168,20 @@ def run_optimization_iterative(
     # Create initial plan as 2D array [episode_length, n_ctrl]
     from seher.jax_util import tree_stack
 
-    initial_plan = tree_stack(
-        [mdp.empty_control() for _ in range(episode_length)]
-    )
+    if initial_plan is None:
+        initial_plan = tree_stack(
+            [mdp.empty_control() for _ in range(episode_length)]
+        )
+    else:
+        # Ensure initial_plan has correct shape
+        if initial_plan.shape[0] != episode_length:
+            raise ValueError(
+                f"Initial plan has wrong length: {initial_plan.shape[0]} "
+                f"!= {episode_length}"
+            )
+        # Convert to JAX array if needed
+        initial_plan = jnp.asarray(initial_plan)
+
     opt_carry = planner.optimizer.initial_carry(sample_parameter=initial_plan)
 
     # JIT compile single optimizer step
@@ -390,3 +406,27 @@ def load_trajectory(path: str) -> dict:
         data = dill.load(f)
 
     return data
+
+
+def extract_plan_from_trajectory(path: str):
+    """Extract optimized control plan from trajectory file.
+
+    Parameters
+    ----------
+    path : str
+        Path to trajectory dill file.
+
+    Returns
+    -------
+    jnp.ndarray
+        Control plan array of shape [episode_length, n_ctrl].
+
+    """
+    import jax.numpy as jnp
+
+    data = load_trajectory(path)
+    history = data['history']
+
+    # Extract controls from history
+    # History.controls has shape [episode_length, n_ctrl]
+    return jnp.array(history.controls)
