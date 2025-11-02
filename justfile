@@ -64,4 +64,4 @@ runpod-setup:
 use-cuda:
     uv add "jaxlib[cuda12]<0.8"
     uv add "jax[cuda12]<0.8"
-     UV_CACHE_DIR=/workspace/uv-cache/ uv sync
+    UV_CACHE_DIR=/workspace/uv-cache/ uv sync
