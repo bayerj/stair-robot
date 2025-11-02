@@ -20,7 +20,7 @@ _get-ssh-command:
     # Extract the SSH connection details and add the SSH key
     # Strip the comment (everything after #) from the SSH command
     ssh_command_base=$(echo "$output" | grep "^ssh " | sed 's/#.*//')
-    ssh_command="$ssh_command_base -i ~/.ssh/id_ed25519 -o PasswordAuthentication=no -A"
+    ssh_command="$ssh_command_base -i ~/.ssh/id_ed25519 -o PasswordAuthentication=no -A -o StrictHostKeyChecking=accept-new"
 
     # Add BatchMode to prevent password prompts during test
     ssh_command_test="$ssh_command -o BatchMode=yes -o ConnectTimeout=10 -o PreferredAuthentications=publickey"
@@ -42,6 +42,7 @@ _get-ssh-command:
     # Output the SSH command for use by other recipes
     echo "$ssh_command"
 
+
 runpod-connect:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -49,9 +50,18 @@ runpod-connect:
     echo "Connecting to pod..."
     eval "exec $ssh_command"
 
+
 # Execute a command on the runpod
 runpod-exec +args:
     #!/usr/bin/env bash
     set -euo pipefail
     ssh_command=$(just _get-ssh-command)
     eval "$ssh_command" "{{ args }}"
+
+runpod-setup:
+    just runpod-exec "git clone git@github.com:bayerj/stair-robot.git \&\& cd /root/stair-robot \&\& just use-cuda"
+
+use-cuda:
+    uv add "jaxlib[cuda12]<0.8"
+    uv add "jax[cuda12]<0.8"
+     UV_CACHE_DIR=/workspace/uv-cache/ uv sync
